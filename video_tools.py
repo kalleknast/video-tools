@@ -5,34 +5,16 @@ Created on Thu Oct  7 15:32:44 2014
 @author: Hjalmar K. Turesson
 """
 import os
-import sys
 from time import sleep, perf_counter
-from glob import glob
 import numpy as np
-from threading import Event, Thread
 from multiprocessing import Process
 from datetime import datetime
 import subprocess
-#import subprocess as sp
 import pygame
 import pygame.camera
-from pygame.locals import Rect
-from pylibftdi import BitBangDevice
-from bayercy import bayer
-import flycapture2 as fc2
-import pandas as pd
-import tables
 import scipy
-from scipy.io import wavfile
-import pyaudio
-#import matplotlib
-#matplotlib.use("Agg")
-#import matplotlib.pyplot as plt
 import imageio
 import time
-import os, psutil, resource
-#import visvis as vv
-
 # Setting GST_DEBUG_DUMP_DOT_DIR environment variable enables us to
 # have a dotfile generated. The environment variable cannot be set inside the class.
 os.environ["GST_DEBUG_DUMP_DOT_DIR"] = "/tmp"
@@ -851,7 +833,7 @@ def get_video_frames_in_interval(vid_fn, ts_fn, interval=[0, -1]):
                                      delimiter=',')
 
     reader = imageio.get_reader(vid_fn)
-    #import pdb;pdb.set_trace()
+
     if interval[0] == 0 and interval[1] == -1:
         ix0 = 0
         ix1 = len(n_and_timestamps)-1
