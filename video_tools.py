@@ -853,302 +853,178 @@ def get_video_frames_in_interval(vid_fn, ts_fn, interval=[0, -1]):
 
 class VideoReader:
     """
-    http://www.eurion.net/python-snippets/snippet/Seeking%20with%20gstreamer.html
+    For reading video frames one-by-one.
+    Reuturns the frames in as a numpy array in RGB format.
     
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 ! tee name=t t. ! queue ! xvimagesink sync=false t. ! queue ! videoconvert ! x264enc ! h264parse ! matroskamux ! filesink location='raw_dual.mkv' sync=false
-    CLI='filesrc location=AT_20150324_1272_01_09-15-37_cont_1.mp4 ! decodebin ! appsink name=sink'
-    CLI='filesrc location=AT_20150324_1272_01_09-15-37_cont_1.mp4 ! decodebin ! autovideosink'
-    pipeline=Gst.parse_launch(CLI)
-    appsink=pipline.get_by_name("sink")
+    Follows the snapshot example:
+    http://cgit.freedesktop.org/gstreamer/gst-plugins-base/tree/tests/examples/snapshot/snapshot.c
     
+    By Hjalmar K. Turesson 2015-12-08
     """
-    def __init__(self, filename):
-        """
-        """
-        self.readfd, self.writefd = os.pipe() 
-        self.frame_size = (480,640,3)
-        self.frame_size_bytes = np.prod(self.frame_size)
-        self.filesrc = Gst.ElementFactory.make('filesrc', None)
-        self.filesrc.set_property('location', filename)
-        self.filesrc.set_property('num_buffers', 1)
-        self.demuxer = Gst.ElementFactory.make('matroskademux', None)
-        self.demuxer.connect('pad-added', self.on_new_pad)
-        demux_caps = Gst.Caps.from_string('video/x-theora')
-        self.demux_filter = Gst.ElementFactory.make('capsfilter', None)
-        self.demux_filter.set_property('caps', demux_caps)
-        self.parser = Gst.ElementFactory.make('theoraparse')
-        self.decoder = Gst.ElementFactory.make('theoradec', None)
-        self.videoconverter = Gst.ElementFactory.make('videoconvert', None)
-        self.fdsink = Gst.ElementFactory.make('fdsink', None)
-        videoconv_caps = Gst.Caps.from_string('video/x-raw,format=RGB')
-        self.fdsink.set_property("fd", self.writefd)
-        
-        def on_new_buffer(appsink):
-        
-           sample = appsink.emit('pull-sample')
-           #get the buffer
-           buf = sample.get_buffer()
-           #extract data stream as string
-           data = buf.extract_dup(0,buf.get_size())
-           frame = np.fromstring(data,np.uint8)
-           print(frame[:10])
 
-           return False
-
-        self.appsink = Gst.ElementFactory.make('appsink', None)
-        # Setting properties of appsink
-        self.appsink.set_property('max-buffers', 20)
-        self.appsink.set_property('emit-signals', True)
-        self.appsink.set_property('sync', False)  # No sync
-        # Connect appsink to my function (writing timestamps)
-        self.appsink.connect('new-sample', on_new_buffer)
-
-        # Create GStreamer pipline
-        self.pipeline = Gst.Pipeline()
-                     
-        self.pipeline.add(self.filesrc)
-        self.pipeline.add(self.demuxer)
-        self.pipeline.add(self.demux_filter)
-        self.pipeline.add(self.parser)
-        self.pipeline.add(self.decoder)
-        self.pipeline.add(self.videoconverter)
-        self.pipeline.add(self.fdsink)
-        #self.pipeline.add(self.appsink)        
-        # link
-        self.filesrc.link(self.demuxer)
-        self.demux_filter.link(self.parser)
-        self.parser.link(self.decoder)
-        self.decoder.link(self.videoconverter)
-        self.videoconverter.link_filtered(self.fdsink, videoconv_caps)
-        #self.videoconverter.link_filtered(self.appsink, videoconv_caps)
-        #self.videoconverter.link(self.appsink)
-    
-        # Create bus to get events from GStreamer pipeline      
-        self.bus = self.pipeline.get_bus()
-        self.bus.add_signal_watch()
-        #self.bus.connect('message::eos', self.on_finish)
-        #self.bus.connect('message::error', self.on_error) 
-      
-        self.pipeline.set_state(Gst.State.PAUSED)
-            
-    def get_frame_by_number(self, frame_number):
-        #self.pipeline.set_state(Gst.State.READY)
-        self.pipeline.set_state(Gst.State.PAUSED)
-        t = self.filesrc.seek_simple(Gst.Format.BUFFERS,
-                                     Gst.SeekFlags.FLUSH,
-                                     frame_number)
-        print('\nt = ',t,'\n')
-        self.pipeline.set_state(Gst.State.PLAYING)                                  
-        frame = np.fromstring(os.read(self.writefd,
-                                      self.frame_size_bytes),
-                              dtype='uint8').reshape(self.frame_size)
-        self.pipeline.set_state(Gst.State.PAUSED)
-        #return frame
-        
-    def get_frame_by_time(self, frame_time):
-        """
-        frame_time in seconds
-        """
-        self.pipeline.set_state(Gst.State.READY)        
-        t = self.pipeline.seek_simple(Gst.Format.TIME,
-                                      Gst.SeekFlags.FLUSH,
-                                      frame_time*Gst.SECOND)
-        print('\nt = ',t,'\n')
-        self.pipeline.set_state(Gst.State.PLAYING)
-        frame = np.fromstring(os.read(self.readfd,
-                                      self.frame_size_bytes),
-                              dtype='uint8').reshape(self.frame_size)
-        self.pipeline.set_state(Gst.State.PAUSED)        
-        return frame        
-    
-    def quit(self):
-        self.pipeline.set_state(Gst.State.NULL)
-
-    def on_new_pad(self, matroskademux, pad):
-        self.demuxer.link(self.demux_filter)
-        
-    ######################################################
-    # Generates the dot file, checks that graphviz in installed
-    # and generates a png file, which it then displays the pipeline
-    ######################################################
-    def on_debug_activate(self):
-        fn = 'pipeline-debug-graph'
-        fn_dot = "%s/%s.dot" % (os.environ.get("GST_DEBUG_DUMP_DOT_DIR"), fn)
-        fn_png = "%s/%s.png" % (os.environ.get("GST_DEBUG_DUMP_DOT_DIR"), fn)
-        Gst.debug_bin_to_dot_file(self.pipeline, Gst.DebugGraphDetails.ALL, fn)
-        try:
-            os.system("dot -Tpng %s > %s" % (fn_dot, fn_png))
-            print('Pipline graph written to %s' % fn_png)
-            Gtk.show_uri(None, "file://%s" % fn_png, 0)
-        except:
-            print('Failure!')
-            # check if graphviz is installed with a simple test
-            if os.system('which dot'):
-                print("Graphviz does not seem to be installed.")
-
-
-
-def reader_time(filename, t):
-    
-    CLI='filesrc location=%s ! decodebin ! appsink name=sink' % filename
-    pipeline=Gst.parse_launch(CLI)
-    # get sink
-    appsink=pipeline.get_by_name("sink")
-    # set to PAUSED to make the first frame arrive in the sink
-    pipeline.set_state(Gst.State.PAUSED)
-    #pipeline.seek_simple(Gst.Format.BUFFERS, Gst.SeekFlags.FLUSH, frame_number)
-    ret = pipeline.seek_simple(Gst.Format.TIME,
-                               Gst.SeekFlags.FLUSH,
-                               int(t*Gst.SECOND))
-    print(ret)
-    smp = appsink.emit('pull-preroll')
-    buf = smp.get_buffer()
-
-    data=buf.extract_dup(0, buf.get_size())[:307200] # Only 1/2 of expected RGB size
-    frame = np.fromstring(data, dtype='uint8').reshape((480, 640, 1))
-    
-    pipeline.set_state(Gst.State.NULL)
-          
-    return frame#, pipeline
-
-class VideoReaderSimple:
-    """
-    http://www.eurion.net/python-snippets/snippet/Seeking%20with%20gstreamer.html
-    
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 ! tee name=t t. ! queue ! xvimagesink sync=false t. ! queue ! videoconvert ! x264enc ! h264parse ! matroskamux ! filesink location='raw_dual.mkv' sync=false
-
-    CLI='filesrc location=AT_20150324_1272_01_09-15-37_cont_1.mp4 ! decodebin ! autovideosink'
-
-    CLI='filesrc location=AT_20150324_1272_01_09-15-37_cont_1.mp4 ! decodebin ! appsink name=sink'    
-    pipeline=Gst.parse_launch(CLI)
-    # get sink
-    appsink=pipeline.get_by_name("sink")
-    # set to PAUSED to make the first frame arrive in the sink
-    pipeline.set_state(Gst.State.PAUSED)
-    
-    # This can block for up to 5 seconds. If your machine is really overloaded,
-    # it might time out before the pipeline prerolled and we generate an error. A
-    # better way is to run a mainloop and catch errors there.
-    pipeline.get_state(5 * Gst.SECOND)
-    #ret = gst_element_get_state (pipeline, NULL, NULL, 5 * GST_SECOND);
-    
-    #   gst_element_seek_simple (pipeline, GST_FORMAT_TIME,
-    #        GST_SEEK_FLAG_KEY_UNIT | GST_SEEK_FLAG_FLUSH, position);
-    frame_number = 101
-    pipeline.seek_simple(Gst.Format.BUFFERS, Gst.SeekFlags.FLUSH, frame_number)
-    
-    # get the preroll buffer from appsink, this block untils appsink really
-    # prerolls
-    # g_signal_emit_by_name (sink, "pull-preroll", &sample, NULL);
-    smp = appsink.emit('pull-preroll')
-    buf = smp.get_buffer()
-    #extract data stream as string
-    data=buf.extract_dup(0,buf.get_size())
-    frame = np.fromstring(datad,type='uint8').reshape((480,640,3))
-    pipeline.set_state(Gst.State.NULL)
-    
-    
-            self.readfd, self.writefd = os.pipe() 
-        self.frame_size = (480,640,3)
-        self.frame_size_bytes = np.prod(self.frame_size)
-        self.filesrc = Gst.ElementFactory.make('filesrc', None)
-        self.filesrc.set_property('location', filename)
-        self.filesrc.set_property('num_buffers', 1)
-        self.demuxer = Gst.ElementFactory.make('matroskademux', None)
-        self.demuxer.connect('pad-added', self.on_new_pad)
-        demux_caps = Gst.Caps.from_string('video/x-theora')
-        self.demux_filter = Gst.ElementFactory.make('capsfilter', None)
-        self.demux_filter.set_property('caps', demux_caps)
-        self.parser = Gst.ElementFactory.make('theoraparse')
-        self.decoder = Gst.ElementFactory.make('theoradec', None)
-        self.videoconverter = Gst.ElementFactory.make('videoconvert', None)
-        self.fdsink = Gst.ElementFactory.make('fdsink', None)
-        videoconv_caps = Gst.Caps.from_string('video/x-raw,format=RGB')
-        self.fdsink.set_property("fd", self.writefd)
-    
-    """
     def __init__(self, filename):
         """
         """
         self.frame_size = (480,640,3)
         self.frame_size_bytes = np.prod(self.frame_size)
-        s='filesrc location=%s ! decodebin ! appsink name=sink' % filename
+        s=('filesrc location=%s '
+           '! decodebin ! videoconvert '
+           '! video/x-raw, height=%d, width=%d, format=RGB '
+           '! videoconvert ! appsink name=sink' % 
+           (filename, self.frame_size[0], self.frame_size[1]))
         self.pipeline=Gst.parse_launch(s)
         # get sink
         self.appsink=self.pipeline.get_by_name("sink")
+        self.appsink.set_property("max-buffers", 20) # To limit memory usage
         # set to PAUSED to make the first frame arrive in the sink
         self.pipeline.set_state(Gst.State.PAUSED)
+        
+        # Pull 1st sample to get framerate
+        smp = self.appsink.emit('pull-preroll')
+        sinkcaps = smp.get_caps().get_structure(0)
+        fps = sinkcaps.get_fraction("framerate")
+        if not fps[0]:
+            print('Frame rate info is missing form file.')
+            return None
+        
+        self.fps_frac = (fps[1], fps[2])
+        self.fps = fps[2]/fps[1]
 
-            
-    def get_frame_by_number(self, frame_n):
+
+    def _get_current_frame(self):
         """
+        Reads the frame at the current position.
+
+        Returns:
+        frame : An uint8 numpy array in RGB format.        
         """
-       
-        ret = self.pipeline.query_duration(Gst.Format.BUFFERS)
-        if not (ret[0] and ret[1] > frame_n):
-            print('Frame number is after end of video.')
-            return self.pipeline
-            
-        ret = self.pipeline.seek_simple(Gst.Format.BUFFERS,
-                                        Gst.SeekFlags.FLUSH,
-                                        int(frame_n))
-        if not ret:
-            print('Seek failed.')
-            return 0
-            
+        
         smp = self.appsink.emit('pull-preroll')
         buf = smp.get_buffer()
-        data=buf.extract_dup(0, buf.get_size())[:307200] # Only 1/2 of expected RGB size
-        
-        frame = np.fromstring(data, dtype='uint8').reshape((480, 640, 1))
-        return frame, pipeline
+        data=buf.extract_dup(0, buf.get_size())
+                    
+        return np.fromstring(data, dtype='uint8').reshape((480, 640, 3))
 
+
+    def get_frame(self, t):
+        """
+        Reads a frame at time t.
         
-    def get_frame_by_time(self, frame_t):
+        Parameter:
+        ---------
+        t : time of frame in seconds.
+        
+        Returns:
+        frame : An uint8 numpy array in RGB format.
         """
-        """
-        t = frame_t * Gst.SECOND
+        t = int(t * Gst.SECOND)
         ret = self.pipeline.query_duration(Gst.Format.TIME)
         if not (ret[0] and ret[1] > t):
-            print('Frame time is after end of video.')
-            return 0
+            print('Requested frame time is after end of video.')
+            return None
             
-        ret = self.pipeline.seek_simple(Gst.Format.TIME,
-                                        Gst.SeekFlags.FLUSH,
-                                        int(frame_t * Gst.SECOND))
+        ret = self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, t)
         if not ret:
-            print('Seek failed.')
-            return 0
+            print('Seek to time %1.4f s failed.' % t/Gst.SECOND)
+            return None
             
-        smp = self.appsink.emit('pull-preroll')
-        buf = smp.get_buffer()
-        data=buf.extract_dup(0, buf.get_size())[:307200] # Only 1/2 of expected RGB size
-            
-        return np.fromstring(data, dtype='uint8').reshape((480, 640, 1))
+        return self._get_current_frame()
 
 
     def get_next_frame(self):
         """
+        Reads the next frame from current position.
+        
+        Returns:
+        frame : An uint8 numpy array in RGB format.
         """
-        return frame
+        ret = self.pipeline.query_position(Gst.Format.TIME)
+        if not ret[0]:
+            print('Position query failed.')
+            return 0
+
+        t = int(ret[1] + self.fps * Gst.SECOND)
+
+        ret = self.pipeline.query_duration(Gst.Format.TIME)
+        if not (ret[0] and ret[1] > t):
+            print('Requested frame time is after end of video.')
+            return None
+     
+        ret = self.pipeline.seek_simple(Gst.Format.TIME,
+                                        Gst.SeekFlags.FLUSH,
+                                        t)
+
+        if not ret:
+            print('Seek to frame at time %1.4f s failed.' % t/Gst.SECOND)
+            return None                                        
+                                              
+        return self._get_current_frame()
         
+
+    def get_current_position(self, fmt='time'):
+        """
+        Returns the current postion in time (seconds) or frame number.
         
+        Parameters:
+        ----------
+        fmt : format for position. 
+              'time' returns time in seconds or 
+              'frame_number' frame number.
+        """
+        
+        pos = None
+        if fmt=='time':
+            ret = self.pipeline.query_position(Gst.Format.TIME)
+            if ret[0]:
+                pos = ret[1]/Gst.SECOND
+        elif fmt=='frame_number':
+            ret = self.pipeline.query_position(Gst.Format.BUFFERS)
+            if ret[0]:
+                pos = ret[1]
+        else:
+            print('%s is not a vaild format.' 
+                  ' Valid formats are "time" | "frame_number"' % fmt)
+
+        if pos is None:
+            print('Position query failed.')
+        
+        return pos
+
+        
+    def get_duration(self, fmt='time'):
+        """
+        Returns duration of video time (seconds) or number of frames.
+        
+        Parameters:
+        ----------
+        fmt : format for position. 
+              'time' returns time in seconds or 
+              'frame_number' approximate number of frames.
+        """
+        
+        dur = None
+        ret = self.pipeline.query_duration(Gst.Format.TIME)
+        if ret[0]:
+            dur = ret[1]/Gst.SECOND
+
+        if fmt=='time':
+            pass
+
+        elif fmt=='frame_number':
+            dur = int(round(dur * self.fps_frac[0]))
+            
+        else:
+            print('%s is not a vaild format.' 
+                  ' Valid formats are "time" | "frame_number"' % fmt)
+
+        if dur is None:
+            print('Position query failed.')
+        
+        return dur
+
+
     def close(self):
+        """
+        Closes the pipeline.
+        """
         self.pipeline.set_state(Gst.State.NULL)
-            
-            
-    def on_debug_activate(self):
-        fn = 'pipeline-debug-graph'
-        fn_dot = "%s/%s" % (os.environ.get("GST_DEBUG_DUMP_DOT_DIR"), fn)
-        fn_png = "%s/%s.png" % (os.environ.get("GST_DEBUG_DUMP_DOT_DIR"), fn)
-        print(fn_dot)
-        Gst.debug_bin_to_dot_file(self.pipeline, Gst.DebugGraphDetails.ALL, fn)
-        try:
-            os.system("dot -Tpng %s > %s" % (fn_dot, fn_png))
-            print('Pipline graph written to %s' % fn_png)
-            Gtk.show_uri(None, "file://%s" % fn_png, 0)
-        except:
-            print('Failure!')
-            # check if graphviz is installed with a simple test
-            if os.system('which dot'):
-                print("Graphviz does not seem to be installed.")        
