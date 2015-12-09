@@ -855,6 +855,7 @@ class VideoReader:
     """
     For reading video frames one-by-one.
     Reuturns the frames in as a numpy array in RGB format.
+    Not meant for playback.
     
     Follows the snapshot example:
     http://cgit.freedesktop.org/gstreamer/gst-plugins-base/tree/tests/examples/snapshot/snapshot.c
@@ -878,6 +879,8 @@ class VideoReader:
         self.appsink.set_property("max-buffers", 20) # To limit memory usage
         # set to PAUSED to make the first frame arrive in the sink
         self.pipeline.set_state(Gst.State.PAUSED)
+        # Wait for state change, i.e. block for up to 5 s.
+        self.pipeline.get_state(5*Gst.SECOND)
         
         # Pull 1st sample to get framerate
         smp = self.appsink.emit('pull-preroll')
@@ -887,8 +890,25 @@ class VideoReader:
             print('Frame rate info is missing form file.')
             return None
         
+        # Frame rate, frames per second
         self.fps_frac = (fps[1], fps[2])
         self.fps = fps[2]/fps[1]
+        # Frames per nanosecond
+        self.fpns = (Gst.SECOND * fps[2])/fps[1]
+        
+        # Duration of video in nano seconds, seconds and frames
+        ret = self.pipeline.query_duration(Gst.Format.TIME)
+        self.duration_nanoseconds = None
+        if ret[0]:
+            self.duration_seconds = ret[1]/Gst.SECOND
+            self.duration_nanoseconds = ret[1]
+            # Approximate the number of frames.
+            self.duration_nframes = int(round(self.duration_seconds
+                                              * self.fps_frac[0]))
+
+        if self.duration_nanoseconds is None:
+            print('Duration query failed.')
+            return None
 
 
     def _get_current_frame(self):
@@ -918,12 +938,13 @@ class VideoReader:
         frame : An uint8 numpy array in RGB format.
         """
         t = int(t * Gst.SECOND)
-        ret = self.pipeline.query_duration(Gst.Format.TIME)
-        if not (ret[0] and ret[1] > t):
+        if self.duration_nanoseconds < t:
             print('Requested frame time is after end of video.')
             return None
             
         ret = self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, t)
+        # Wait for state change, i.e. block for up to 5 s.
+        self.pipeline.get_state(5*Gst.SECOND)
         if not ret:
             print('Seek to time %1.4f s failed.' % t/Gst.SECOND)
             return None
@@ -943,21 +964,49 @@ class VideoReader:
             print('Position query failed.')
             return 0
 
-        t = int(ret[1] + self.fps * Gst.SECOND)
+        t = int(round(ret[1] + self.fpns))
 
-        ret = self.pipeline.query_duration(Gst.Format.TIME)
-        if not (ret[0] and ret[1] > t):
+        # NOTE:
+        # Seems like pipeline.query_position(Gst.Format.BUFFERS) failes to 
+        # return current position in number of frames.
+        # Fix this and frame stepping can be checked.
+
+#        # Get postion before seek
+#        ret = self.pipeline.query_position(Gst.Format.BUFFERS)
+#        if not ret[0]:
+#            print('Failed to get to current position.')
+#            return None
+#        else:
+#            old_pos = ret[1]
+
+        if self.duration_nanoseconds < t:
             print('Requested frame time is after end of video.')
             return None
      
-        ret = self.pipeline.seek_simple(Gst.Format.TIME,
-                                        Gst.SeekFlags.FLUSH,
-                                        t)
-
+        ret = self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, t)
+        # Wait for state change, i.e. block for up to 5 s.
+        self.pipeline.get_state(5*Gst.SECOND)
         if not ret:
             print('Seek to frame at time %1.4f s failed.' % t/Gst.SECOND)
-            return None                                        
-                                              
+            return None         
+
+        # NOTE:
+        # Seems like pipeline.query_position(Gst.Format.BUFFERS) failes to 
+        # return current position in number of frames.
+        # Fix this and frame stepping can be checked.
+
+#        # Check that we really only stepped 1 frame.
+#        ret = self.pipeline.query_position(Gst.Format.BUFFERS)
+#        if not ret[0]:
+#            print('Failed to get new position.')
+#            return None
+#        else:
+#            new_pos = ret[1]
+#            if not (old_pos + 1) == new_pos:
+#                print('Failed to step one frame.\nOld frame num:'
+#                      ' %d, new frame num: %d' % (old_pos, new_pos))
+#            return None
+                                                                                     
         return self._get_current_frame()
         
 
@@ -990,41 +1039,11 @@ class VideoReader:
         
         return pos
 
-        
-    def get_duration(self, fmt='time'):
-        """
-        Returns duration of video time (seconds) or number of frames.
-        
-        Parameters:
-        ----------
-        fmt : format for position. 
-              'time' returns time in seconds or 
-              'frame_number' approximate number of frames.
-        """
-        
-        dur = None
-        ret = self.pipeline.query_duration(Gst.Format.TIME)
-        if ret[0]:
-            dur = ret[1]/Gst.SECOND
-
-        if fmt=='time':
-            pass
-
-        elif fmt=='frame_number':
-            dur = int(round(dur * self.fps_frac[0]))
-            
-        else:
-            print('%s is not a vaild format.' 
-                  ' Valid formats are "time" | "frame_number"' % fmt)
-
-        if dur is None:
-            print('Position query failed.')
-        
-        return dur
-
 
     def close(self):
         """
         Closes the pipeline.
         """
         self.pipeline.set_state(Gst.State.NULL)
+        # Wait for state change, i.e. block for up to 5 s.
+        self.pipeline.get_state(5*Gst.SECOND)
