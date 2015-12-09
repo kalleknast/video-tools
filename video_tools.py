@@ -5,14 +5,8 @@ Created on Thu Oct  7 15:32:44 2014
 @author: Hjalmar K. Turesson
 """
 import os
-from time import sleep, perf_counter
 import numpy as np
-from multiprocessing import Process
 from datetime import datetime
-import subprocess
-import pygame
-import pygame.camera
-import scipy
 import imageio
 import time
 # Setting GST_DEBUG_DUMP_DOT_DIR environment variable enables us to
@@ -90,7 +84,7 @@ class Webcam_h264:
             self.ts_log.write('%d,%0.9f,%0.9f,%0.9f\n' % 
                               (self.n_frames,
                                timestamp,
-                               np.float64(1e-9) * buf.pts,
+                               buf.pts / Gst.SECOND,
                                timestamp1))
             return False
 
@@ -248,7 +242,7 @@ class Webcam_h264:
         self.offset_t = datetime.now().timestamp() - self.t_start
         self.pipeline.set_state(Gst.State.PLAYING)
 
-    def quit(self):
+    def close(self):
         self.pipeline.set_state(Gst.State.NULL)
         self.ts_log.close()
 
@@ -293,30 +287,64 @@ class Webcam:
     https://blogs.gnome.org/uraeus/2012/11/08/gstreamer-python-and-videomixing/
     
     """
-    def __init__(self, video_dev='/dev/video0',
+    def __init__(self,
+                 video_fname=None,
+                 tslog_fname=None,
+                 video_dev='/dev/video0',
                  audio_dev=None,
                  fps=15,
                  t_start=0.0,
-                 write=True,
                  display=True,
                  timestamp=True,
                  srcenc='mjpeg',
                  writeenc='theora',
                  draw_timestamp=True):
         """
+        
+        Parameters
+        ----------
+        video_fname    : File name, including path, of saved video file.
+                         If it does not end with .mkv this will be appended.
+                         Default: None, no file will be written.
+        tslog_fname    : File name, including path, of saved timestamp log file.
+                         Default: video_fname[:-3] + log
+        video_dev      :
+        audio_dev      :
+        fps            :
+        t_start        : 
+        display        :
+        display        :  
+        timestamp      :
+        srcenc         : raw or ..?
+        writeenc       : Encoding of saved video.
+                         Alternatives: 'theora'(default), 'vp8' and 'mp4'.
+                         Theora probably produces the most reliavle timestamps.
+        dra_timestamp  : Whether to draw timestamp on saved video.
+                         Default: True
+                         
+        Returns/output
+        --------------
+
+
         Understand audio_dev:
             hw:X,Y comes from this mapping of audio hardware
             X is the card number, while Y is the device number.
             Use 'arecord -l' to list the available cards and devices.
             
-        writeenc  - theora, vp8 or h.264
-        srcenc   - raw or 
         """
-        ts_log_fname = 'webcam_timestamps.log'
-        vid_fname = 'webcam.mkv'
         
+        if not video_fname is None:
+            self.write = True
+            if not video_fname.endswith('.mkv'):
+                print('.mkv is appended to video_fname')
+                video_fname = '%s.mkv' % video_fname
+
+            if tslog_fname is None:
+                tslog_fname = '%slog' % video_fname[:-3]
+        else:
+            self.write = False
+
         self.timestamp=timestamp
-        self.write=write
         self.display=display
         if not self.timestamp:
             draw_timestamp = False
@@ -368,8 +396,8 @@ class Webcam:
             srcdec = None
         
         if self.timestamp:
-            self.ts_log = open(ts_log_fname, 'w')
-            self.ts_log.write('video filename: %s, t_start: %0.9f'
+            self.ts_log = open(tslog_fname, 'w')
+            self.ts_log.write('video fname: %s, t_start: %0.9f'
                               '\nframe_number, offset_ts, cam_running_ts, python_ts\n' %
                               (vid_fname, t_start))
         if not t_start:
@@ -676,7 +704,7 @@ class Webcam:
         self.offset_t = datetime.now().timestamp() - self.t_start
         self.pipeline.set_state(Gst.State.PLAYING)
 
-    def quit(self):
+    def close(self):
         self.pipeline.set_state(Gst.State.NULL)
         if self.timestamp:
             self.ts_log.close()
@@ -747,7 +775,7 @@ class Webcam_ts_minimal_h264:
     def run(self):
         self.pipeline.set_state(Gst.State.PLAYING)
 
-    def quit(self):
+    def close(self):
         self.pipeline.set_state(Gst.State.NULL)
         self.ts_log.close()
 
@@ -815,38 +843,54 @@ class Webcam_ts_minimal_raw:
         self.t0 = time.perf_counter()
         self.pipeline.set_state(Gst.State.PLAYING)
 
-    def quit(self):
+    def close(self):
         self.pipeline.set_state(Gst.State.NULL)
         self.ts_log.close()        
 
         
-def get_video_frames_in_interval(vid_fn, ts_fn, interval=[0, -1]):
+def get_frames_in_interval(vid_fn, ts_fn, interval=[0, -1]):
     """
-    interval -- list or tuple with t0 and t1, the first and last time in the
-                interval to extract.
+    Parameters
+    ----------
+    video_fn     -- filename of video
+    tslog_fn     -- filename of timestamp log
+    interval     -- list or tuple with t0 and t1, the first and last time
+                    in the interval to extract.
+    Returns
+    -------
+    frames       -- The read frames
+    n_and_tes    -- frame numbers and timestamps for the frames
     """
 
-    dtypes = [('frame_n', int), ('ts', np.float64), ('run_ts', np.float64), ('py_ts', np.float64)]
-    n_and_timestamps = np.genfromtxt(ts_fn,
-                                     dtype=dtypes,
-                                     skip_header=2,
-                                     delimiter=',')
+    dtypes = [('frame_n', int),
+              ('ts', np.float64),
+              ('run_ts', np.float64),
+              ('py_ts', np.float64),
+              ('vid_ts', np.float64)]
 
-    reader = imageio.get_reader(vid_fn)
+    n_and_ts = np.genfromtxt(ts_fn, dtype=dtypes, skip_header=2, delimiter=',')
 
-    if interval[0] == 0 and interval[1] == -1:
-        ix0 = 0
-        ix1 = len(n_and_timestamps)-1
-    else:
-        ix0 = np.flatnonzero(n_and_timestamps['ts'] >= interval[0])[0]
-        ix1 = np.flatnonzero(n_and_timestamps['ts'] <= interval[1])[-1]
+    reader = VideoReader(vid_fn)
+
+    t0, t1 = interval, interval[1]
+    if t1 == -1:  # Until end
+        t1 = reader.duration_seconds
+
+    n_and_ts = n_and_ts[n_and_ts['ts'] >= t0]
+    n_and_ts = n_and_ts[n_and_ts['ts'] <= t1]
+    
     frames = []
-    #n_and_ts = np.recarray(shape=(), dtype=dtypes)
-    for ix in range(ix0, ix1+1):
-        frames.append(reader.get_data(ix))
+    frames.append(reader.get_frame(n_and_ts[0]['run_ts']))
+    t = reader.get_current_position('time')
 
+    i=0
+    while t <= n_and_ts[-1]['run_ts']:
+        frames.append(reader.get_next_frame())
+        t = reader.get_current_position('time')
+        n_and_ts['vid_ts'][i] = t
+        i+=1
+        
     reader.close()
-    n_and_ts = n_and_timestamps[ix0:ix1+1]
 
     return frames, n_and_ts
 
@@ -863,7 +907,7 @@ class VideoReader:
     By Hjalmar K. Turesson 2015-12-08
     """
 
-    def __init__(self, filename):
+    def __init__(self, fname):
         """
         """
         self.frame_size = (480,640,3)
@@ -872,7 +916,7 @@ class VideoReader:
            '! decodebin ! videoconvert '
            '! video/x-raw, height=%d, width=%d, format=RGB '
            '! videoconvert ! appsink name=sink' % 
-           (filename, self.frame_size[0], self.frame_size[1]))
+           (fname, self.frame_size[0], self.frame_size[1]))
         self.pipeline=Gst.parse_launch(s)
         # get sink
         self.appsink=self.pipeline.get_by_name("sink")
