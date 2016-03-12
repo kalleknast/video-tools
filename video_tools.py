@@ -7,30 +7,29 @@ Created on Thu Oct  7 15:32:44 2014
 import os
 import numpy as np
 from datetime import datetime
-import imageio
 import time
-# Setting GST_DEBUG_DUMP_DOT_DIR environment variable enables us to
-# have a dotfile generated. The environment variable cannot be set inside the class.
+# Setting GST_DEBUG_DUMP_DOT_DIR environment variable enables us to  have a
+#  dotfile generated. The environment variable cannot be set inside the class.
 os.environ["GST_DEBUG_DUMP_DOT_DIR"] = "/tmp"
 # GStreamer imports
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import GObject, Gst, Gtk
-Gst.debug_set_active(True)
-Gst.debug_set_default_threshold(2)
+Gst.debug_set_active(False)
+Gst.debug_set_default_threshold(0)
 GObject.threads_init()
 Gst.init(None)
 
 
 class Webcam_h264:
     def __init__(self, video_dev='/dev/video0',
-                 audio_dev = None,
+                 audio_dev=None,
                  fps=30,
                  t_start=0.0):
         """
         Understand audio_dev:
-            hw:X,Y comes from this mapping of audio hardware 
-            X is the card number, while Y is the device number. 
+            hw:X,Y comes from this mapping of audio hardware
+            X is the card number, while Y is the device number.
             Use 'arecord -l' to list the available cards and devices.
             http://jan.newmarch.name/LinuxSound/Sampled/Alsa/
         """
@@ -40,8 +39,7 @@ class Webcam_h264:
         elif audio_dev is 'default':
             audio_dev = "hw:2,0"
             audio = True
-            
-        
+
         ts_log_fname = 'webcam_h264_timestamps.log'
         vid_fname = 'webcam_h264.mkv'
         self.ts_log = open(ts_log_fname, 'w')
@@ -81,7 +79,7 @@ class Webcam_h264:
             timestamp = np.float64(1e-9) * buf.pts + self.offset_t
             timestamp1 = datetime.now().timestamp() - self.t_start
             self.n_frames += 1
-            self.ts_log.write('%d,%0.9f,%0.9f,%0.9f\n' % 
+            self.ts_log.write('%d,%0.9f,%0.9f,%0.9f\n' %
                               (self.n_frames,
                                timestamp,
                                buf.pts / Gst.SECOND,
@@ -141,13 +139,13 @@ class Webcam_h264:
         self.ts0sink.connect('new-sample', on_new_sample)
 
         self.queue0 = Gst.ElementFactory.make('queue', None)
-        self.queue1 = Gst.ElementFactory.make('queue', None)                
+        self.queue1 = Gst.ElementFactory.make('queue', None)
         self.disp_queue = Gst.ElementFactory.make('queue', None)
         self.file_queue = Gst.ElementFactory.make('queue', None)
         self.ts_queue = Gst.ElementFactory.make('queue', None)
-        
+
         #self.queue = Gst.ElementFactory.make('queue', None)
-        
+
         if audio:
             # Audio source:
             self.alsasrc0 = Gst.ElementFactory.make('alsasrc')
@@ -163,7 +161,7 @@ class Webcam_h264:
             self.audconv = Gst.ElementFactory.make('audioconvert', None)
             self.audenc = Gst.ElementFactory.make('flacenc', None)
             self.aud_queue = Gst.ElementFactory.make('queue', None)
-        
+
         # Add elements to the pipeline
         self.pipeline.add(self.v4l2src0)
         self.pipeline.add(self.vid0filter)
@@ -180,12 +178,12 @@ class Webcam_h264:
         self.pipeline.add(self.disp_queue)
         self.pipeline.add(self.file_queue)
         self.pipeline.add(self.ts_queue)
-        
+
         if audio:
-            self.pipeline.add(self.alsasrc0)            
+            self.pipeline.add(self.alsasrc0)
             self.pipeline.add(self.aud0filter)
             self.pipeline.add(self.audconv)
-            self.pipeline.add(self.audenc)            
+            self.pipeline.add(self.audenc)
             self.pipeline.add(self.aud_queue)
 
         ###############
@@ -193,7 +191,7 @@ class Webcam_h264:
         ###############
         # video source
         if not self.v4l2src0.link(self.vid0filter):
-            print('video source to video filter link failed')          
+            print('video source to video filter link failed')
         if not self.vid0filter.link(self.vid0parse):
             print('video filter to video parse link failed')
         if not self.vid0parse.link(self.tee0):
@@ -207,7 +205,7 @@ class Webcam_h264:
             if not self.audconv.link(self.audenc):
                 print('audio convert to audio enconder link failed')
             if not self.audenc.link(self.aud_queue):
-                print('audio enconder to audio queue link failed')      
+                print('audio enconder to audio queue link failed')
         # tee
         if not self.tee0.link(self.disp_queue):
             print('tee to display queue link failed')
@@ -221,7 +219,7 @@ class Webcam_h264:
         if not self.vid0decode.link(self.disp0scale):
             print('decode to videoscale link failed')
         if not self.disp0scale.link(self.queue0):
-            print('disp0scale to queue0 link failed')            
+            print('disp0scale to queue0 link failed')
         if not self.queue0.link_filtered(self.disp0sink, disp0caps):
             print('queue0 to display-sink link failed')
         # file sink
@@ -229,9 +227,9 @@ class Webcam_h264:
             print('file queue to mux link failed')
         if audio:
             if not self.aud_queue.link(self.mux):
-                print('audio queue to mux link failed')            
+                print('audio queue to mux link failed')
         if not self.mux.link(self.queue1):
-            print('mux to queue1 link failed')            
+            print('mux to queue1 link failed')
         if not self.queue1.link(self.file0sink):
             print('queue1 to file-sink link failed')
         # timestamp sink
@@ -257,35 +255,61 @@ class Webcam_h264:
 class Webcam:
     """
     Test commands:
-    
     raw, mjpg or h264 from camera
     ----------------
     Single to display:
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-h264,width=640,height=480,framerate=15/1 ! h264parse ! avdec_h264 ! xvimagesink sync=false
+    gst-launch-1.0 -v v4l2src device=/dev/video0 !
+            video/x-h264,width=640,height=480,framerate=15/1 !
+            h264parse ! avdec_h264 ! xvimagesink sync=false
     Dual to display and file:
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-h264,width=640,height=480,framerate=15/1 ! tee name=t t. ! queue ! h264parse ! avdec_h264 ! xvimagesink sync=false t. ! queue ! h264parse ! matroskamux ! filesink location='h264_dual.mkv' sync=false
-    
+    gst-launch-1.0 -v v4l2src device=/dev/video0 !
+            video/x-h264,width=640,height=480,framerate=15/1 !
+            tee name=t t. ! queue ! h264parse ! avdec_h264 !
+            xvimagesink sync=false t. ! queue ! h264parse ! matroskamux !
+            filesink location='h264_dual.mkv' sync=false
+
     Raw from camera
     ---------------
     Single to display:
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 ! xvimagesink sync=false
+    gst-launch-1.0 -v v4l2src device=/dev/video0 !
+            video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 !
+            xvimagesink sync=false
     Single to encoded to file:
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 ! videoconvert ! x264enc ! matroskamux ! filesink location='raw_single.mkv' sync=false
+    gst-launch-1.0 -v v4l2src device=/dev/video0 !
+            video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 !
+            videoconvert ! x264enc ! matroskamux !
+            filesink location='raw_single.mkv' sync=false
     Dual to display and encoded to file:
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 ! tee name=t t. ! queue ! xvimagesink sync=false t. ! queue ! videoconvert ! x264enc ! h264parse ! matroskamux ! filesink location='raw_dual.mkv' sync=false
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 ! tee name=t t. ! queue ! xvimagesink sync=false t. ! queue ! videoconvert ! x264enc tune=zerolatency ! h264parse ! matroskamux ! filesink location='raw_dual.mkv' sync=false
-    
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 ! tee name=t t. ! queue ! xvimagesink sync=false t. ! queue ! videoconvert ! theoraenc ! theoraparse ! matroskamux ! filesink location='raw_dual.mkv' sync=false
-    
-    gst-launch-1.0 -v v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 ! tee name=t t. ! queue ! xvimagesink sync=false t. ! queue ! videoconvert ! vp8enc ! matroskamux ! filesink location='raw_dual.mkv' sync=false
-    
+    gst-launch-1.0 -v v4l2src device=/dev/video0 !
+            video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 !
+            tee name=t t. ! queue ! xvimagesink sync=false t. ! queue !
+            videoconvert ! x264enc ! h264parse ! matroskamux !
+            filesink location='raw_dual.mkv' sync=false
+    gst-launch-1.0 -v v4l2src device=/dev/video0 !
+            video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 !
+            tee name=t t. ! queue ! xvimagesink sync=false t. ! queue !
+            videoconvert ! x264enc tune=zerolatency ! h264parse ! matroskamux !
+            filesink location='raw_dual.mkv' sync=false
+
+    gst-launch-1.0 -v v4l2src device=/dev/video0 !
+            video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 !
+            tee name=t t. ! queue ! xvimagesink sync=false t. ! queue !
+            videoconvert ! theoraenc ! theoraparse ! matroskamux !
+            filesink location='raw_dual.mkv' sync=false
+
+    gst-launch-1.0 -v v4l2src device=/dev/video0 !
+            video/x-raw,format=YUY2,width=640,height=480,framerate=15/1 !
+            tee name=t t. ! queue ! xvimagesink sync=false t. ! queue !
+            videoconvert ! vp8enc ! matroskamux !
+            filesink location='raw_dual.mkv' sync=false
+
     Good info on v4l2src and webcam stream:
     http://blog.buberel.org/2008/03/but-wait-theres.html
-    
+
     Textoverlay / draw_timestamp info:
-    http://stackoverflow.com/questions/22469913/gstreamer-textoverlay-is-not-dynamically-updated-during-play
+    http://stackoverflow.com/questions/22469913/gstreamer-textoverlay-is-not-
+            dynamically-updated-during-play
     https://blogs.gnome.org/uraeus/2012/11/08/gstreamer-python-and-videomixing/
-    
     """
     def __init__(self,
                  video_fname=None,
@@ -300,20 +324,20 @@ class Webcam:
                  writeenc='theora',
                  draw_timestamp=True):
         """
-        
         Parameters
         ----------
         video_fname    : File name, including path, of saved video file.
                          If it does not end with .mkv this will be appended.
                          Default: None, no file will be written.
-        tslog_fname    : File name, including path, of saved timestamp log file.
+        tslog_fname    : File name, including path,
+                         of saved timestamp log file.
                          Default: video_fname[:-3] + log
         video_dev      :
         audio_dev      :
         fps            :
-        t_start        : 
+        t_start        :
         display        :
-        display        :  
+        display        :
         timestamp      :
         srcenc         : raw or ..?
         writeenc       : Encoding of saved video.
@@ -321,7 +345,7 @@ class Webcam:
                          Theora probably produces the most reliavle timestamps.
         dra_timestamp  : Whether to draw timestamp on saved video.
                          Default: True
-                         
+
         Returns/output
         --------------
 
@@ -330,9 +354,8 @@ class Webcam:
             hw:X,Y comes from this mapping of audio hardware
             X is the card number, while Y is the device number.
             Use 'arecord -l' to list the available cards and devices.
-            
+
         """
-        
         if not video_fname is None:
             self.write = True
             if not video_fname.endswith('.mkv'):
@@ -344,12 +367,12 @@ class Webcam:
         else:
             self.write = False
 
-        self.timestamp=timestamp
-        self.display=display
+        self.timestamp = timestamp
+        self.display = display
         if not self.timestamp:
             draw_timestamp = False
         self.draw_timestamp = draw_timestamp
-            
+
         if audio_dev is None:
             self.audio = False
         elif audio_dev is 'default':
@@ -375,31 +398,31 @@ class Webcam:
         srcdec = None
         if 'raw' in srcenc:
             src_caps = ('video/x-raw,'
-                         'format=YUY2,'
-                         'width=%d,height=%d,'
-                         'framerate=%d/1' % (640, 480, fps))
+                        'format=YUY2,'
+                        'width=%d,height=%d,'
+                        'framerate=%d/1' % (640, 480, fps))
         elif 'peg' in srcenc:
             src_caps = ('image/jpeg,'
-                         'width=%d,height=%d,'
-                         'framerate=%d/1' % (640, 480, fps))
+                        'width=%d,height=%d,'
+                        'framerate=%d/1' % (640, 480, fps))
             srcdec = 'jpegdec'
         elif '264' in srcenc:
             src_caps = ('video/x-h264,'
-                         'width=%d,height=%d,'
-                         'framerate=%d/1' % (640, 480, fps))
+                        'width=%d,height=%d,'
+                        'framerate=%d/1' % (640, 480, fps))
             srcparse = 'h264parse'
             srcdec = 'avdec_h264'
-        
+
         skip_encdec = False
         if ('264' in srcenc) and (writeenc is 'x264enc'):
             skip_encdec = True
             srcdec = None
-        
+
         if self.timestamp:
             self.ts_log = open(tslog_fname, 'w')
-            self.ts_log.write('video fname: %s, t_start: %0.9f'
-                              '\nframe_number, offset_ts, cam_running_ts, python_ts\n' %
-                              (vid_fname, t_start))
+            self.ts_log.write('video fname: %s, t_start: %0.9f\nframe_number, '
+                              'offset_ts, cam_running_ts, python_ts\n' %
+                              (video_fname, t_start))
         if not t_start:
             self.t_start = datetime.now().timestamp()
         else:
@@ -425,7 +448,7 @@ class Webcam:
         self.v4l2src0.set_property('device', video_dev)
         self.v4l2src0.set_property('do-timestamp', 'true')
         # Video source filters
-        # Formats available from C920 camera: 
+        # Formats available from C920 camera:
         #   'image/jpeg', 'video/x-h264', 'video/x-raw'
         vid_caps = Gst.Caps.from_string(src_caps)
         self.vid_filter = Gst.ElementFactory.make('capsfilter', None)
@@ -446,16 +469,17 @@ class Webcam:
                 self.vid_conv = Gst.ElementFactory.make('videoconvert')
                 self.vid_enc = Gst.ElementFactory.make(writeenc, None)
                 if not writeenc_prop is None:
-                    self.vid_enc.set_property(writeenc_prop[0], writeenc_prop[1])
+                    self.vid_enc.set_property(writeenc_prop[0],
+                                              writeenc_prop[1])
                 if not writeparse is None:
                     self.vid_parse = Gst.ElementFactory.make(writeparse, None)
             self.mux = Gst.ElementFactory.make('matroskamux', None)
             mux_caps = Gst.Caps.from_string('%s,'
                                             'width=%d,height=%d,'
-                                            'framerate=%d/1' % 
+                                            'framerate=%d/1' %
                                             (writeenc_caps, 640, 480, fps))
             self.file_sink = Gst.ElementFactory.make('filesink', None)
-            self.file_sink.set_property('location', vid_fname)
+            self.file_sink.set_property('location', video_fname)
             self.file_sink.set_property('sync', False)
 
         ####
@@ -476,7 +500,7 @@ class Webcam:
             self.ts_sink.set_property('drop', False)
             # Connect appsink to my function (writing timestamps)
             self.ts_sink.connect('new-sample', self.on_new_sample)
-                            
+
         ####
         # Display branch
         ####
@@ -488,13 +512,13 @@ class Webcam:
             self.disp_scale = Gst.ElementFactory.make('videoscale', None)
             # Display filter caps:
             disp_caps = Gst.Caps.from_string('video/x-raw,'
-                                              'width=%d,height=%d' %
-                                              (640, 480))
+                                             'width=%d,height=%d' %
+                                             (640, 480))
             # display sink:
             self.disp_sink = Gst.ElementFactory.make('xvimagesink', None)
             self.disp_sink.set_property('sync', False)
             #self.disp0sink.set_property('filter-caps', disp0caps)
-                    
+
         if self.audio:
             # Audio source:
             self.alsasrc0 = Gst.ElementFactory.make('alsasrc')
@@ -510,7 +534,7 @@ class Webcam:
             self.audconv = Gst.ElementFactory.make('audioconvert', None)
             self.audenc = Gst.ElementFactory.make('flacenc', None)
             self.aud_queue = Gst.ElementFactory.make('queue', None)
-        
+
         # Add elements to the pipeline
         self.pipeline.add(self.v4l2src0)
         self.pipeline.add(self.vid_filter)
@@ -519,34 +543,34 @@ class Webcam:
         if not srcdec is None:
             self.pipeline.add(self.read_dec)
         self.pipeline.add(self.tee0)
-                
+
         if self.write:
-            self.pipeline.add(self.file_queue) 
+            self.pipeline.add(self.file_queue)
             if not skip_encdec:
                 self.pipeline.add(self.vid_conv)
                 self.pipeline.add(self.vid_enc)
                 if not writeparse is None:
                     self.pipeline.add(self.vid_parse)
             self.pipeline.add(self.mux)
-            self.pipeline.add(self.file_sink)        
+            self.pipeline.add(self.file_sink)
         if self.timestamp:
             if self.draw_timestamp:
-                self.pipeline.add(self.textoverlay)                
+                self.pipeline.add(self.textoverlay)
             self.pipeline.add(self.ts_sink)
             self.pipeline.add(self.ts_queue)
-        
+
         if self.display:
             self.pipeline.add(self.disp_scale)
             if skip_encdec:
                 self.pipeline.add(self.disp_dec)
             self.pipeline.add(self.disp_sink)
             self.pipeline.add(self.disp_queue)
-        
+
         if self.audio:
-            self.pipeline.add(self.alsasrc0)            
+            self.pipeline.add(self.alsasrc0)
             self.pipeline.add(self.aud_filter)
             self.pipeline.add(self.aud_conv)
-            self.pipeline.add(self.aud_enc)            
+            self.pipeline.add(self.aud_enc)
             self.pipeline.add(self.aud_queue)
 
         ###############
@@ -571,7 +595,7 @@ class Webcam:
                 if not self.vid_filter.link(self.read_dec):
                     print('video filter to video decode link failed')
                 if not self.read_dec.link(self.tee0):
-                    print('video decode to tee link failed')                        
+                    print('video decode to tee link failed')
             else:
                 if not self.vid_filter.link(self.tee0):
                     print('video filter to tee link failed')
@@ -589,15 +613,16 @@ class Webcam:
                         print('video converter to video encoder link failed')
                     if not writeparse is None:
                         if not self.vid_enc.link(self.vid_parse):
-                            print('video encoder to video parser link failed')                  
-                        if not self.vid_parse.link_filtered(self.mux, mux_caps):
-                            print('video encoder to filter and mux link failed')
+                            print('video encoder to video parser link failed')
+                        if not self.vid_parse.link_filtered(self.mux,
+                                                            mux_caps):
+                            print('video encoder to filter & mux link failed')
                     else:
                         if not self.vid_enc.link_filtered(self.mux, mux_caps):
-                            print('video encoder to filter and mux link failed')
+                            print('video encoder to filter & mux link failed')
                 else:
                     if not self.textoverlay.link_filtered(self.mux, mux_caps):
-                        print('textoverlay to filter and mux link failed')
+                        print('textoverlay to filter & mux link failed')
             else:
                 if not skip_encdec:
                     if not self.file_queue.link(self.vid_conv):
@@ -606,15 +631,16 @@ class Webcam:
                         print('video converter to video encoder link failed')
                     if not writeparse is None:
                         if not self.vid_enc.link(self.vid_parse):
-                            print('video encoder to video parser link failed')                  
-                        if not self.vid_parse.link_filtered(self.mux, mux_caps):
-                            print('video encoder to filter and mux link failed')
+                            print('video encoder to video parser link failed')
+                        if not self.vid_parse.link_filtered(self.mux,
+                                                            mux_caps):
+                            print('video encoder to filter & mux link failed')
                     else:
                         if not self.vid_enc.link_filtered(self.mux, mux_caps):
-                            print('video encoder to filter and mux link failed')
+                            print('video encoder to filter & mux link failed')
                 else:
                     if not self.file_queue.link_filtered(self.mux, mux_caps):
-                        print('file queue to filter and mux link failed')
+                        print('file queue to filter & mux link failed')
             if not self.mux.link(self.file_sink):
                 print('mux to file-sink link failed')
 
@@ -636,10 +662,10 @@ class Webcam:
                     print('display decode to display scale link failed')
             else:
                 if not self.disp_queue.link(self.disp_scale):
-                    print('display queue to display scale link failed')                 
+                    print('display queue to display scale link failed')
             if not self.disp_scale.link_filtered(self.disp_sink, disp_caps):
                 print('display scale to display-sink link failed')
-                        
+
         if self.audio:
             # audio source
             if not self.alsasrc0.link(self.aud_filter):
@@ -652,7 +678,7 @@ class Webcam:
                 print('audio enconder to audio queue link failed')
             if not self.aud_queue.link(self.mux):
                 print('audio queue to mux link failed')
-                
+
     ###########################
     # Callable function for writing timestamps
     ###########################
@@ -667,17 +693,17 @@ class Webcam:
         timestamp = np.float64(1e-9) * buf.pts + self.offset_t
         ts1 = datetime.now().timestamp() - self.t_start
         self.n_frames += 1
-        self.ts_log.write('%d,%0.9f,%0.9f,%0.9f\n' % 
+        self.ts_log.write('%d,%0.9f,%0.9f,%0.9f\n' %
                           (self.n_frames,
+                           timestamp,
+                           np.float64(1e-9) * buf.pts,
+                           ts1))
+        if self.draw_timestamp:
+            parsed_ts = ('frame #: %d, ts: %0.5f, pts: %0.5f, ts1: %0.5f\n' %
+                         (self.n_frames,
                           timestamp,
                           np.float64(1e-9) * buf.pts,
                           ts1))
-        if self.draw_timestamp:
-            parsed_ts = ('frame #: %d, ts: %0.5f, pts: %0.5f, ts1: %0.5f\n' % 
-                         (self.n_frames,
-                         timestamp,
-                         np.float64(1e-9) * buf.pts,
-                         ts1))
             self.textoverlay.set_property('text', parsed_ts)
         return Gst.FlowReturn.OK
 
@@ -722,12 +748,12 @@ class Webcam_ts_minimal_h264:
         """
         """
         ts_log_fname = 'ts_test.log'
-                 
+
         self.ts_log = open(ts_log_fname, 'w')
         self.ts_log.write('n_buf, buf.pts\n')
         self.n_frames = 0
         self.pipeline = Gst.Pipeline()
-        
+
         def on_new_sample(appsink):
             """
             Function called from the pipeline by appsink.
@@ -737,7 +763,7 @@ class Webcam_ts_minimal_h264:
             smp = appsink.emit('pull-sample')
             buf = smp.get_buffer()
             self.n_frames += 1
-            self.ts_log.write('%d,%0.9f\n' % 
+            self.ts_log.write('%d,%0.9f\n' %
                               (self.n_frames, np.float64(1e-9) * buf.pts))
             return Gst.FlowReturn.OK
 
@@ -745,7 +771,7 @@ class Webcam_ts_minimal_h264:
         self.v4l2src = Gst.ElementFactory.make('v4l2src', None)
         self.v4l2src.set_property('device', video_dev)
         self.v4l2src.set_property('do-timestamp', 'true')
-        # Formats available from C920 camera: 
+        # Formats available from C920 camera:
         #   'image/jpeg', 'video/x-h264', 'video/x-raw'
         vid_caps = Gst.Caps.from_string('video/x-h264,'
                                         'width=%d,height=%d,'
@@ -771,7 +797,7 @@ class Webcam_ts_minimal_h264:
         self.v4l2src.link(self.vid_filter)
         self.vid_filter.link(self.vid_parse)
         self.vid_parse.link(self.ts_sink)
-                      
+
     def run(self):
         self.pipeline.set_state(Gst.State.PLAYING)
 
@@ -779,19 +805,19 @@ class Webcam_ts_minimal_h264:
         self.pipeline.set_state(Gst.State.NULL)
         self.ts_log.close()
 
-       
+
 class Webcam_ts_minimal_raw:
     def __init__(self, video_dev='/dev/video0', fps=15):
         """
         """
         ts_log_fname = 'ts_test.log'
-                 
+
         self.ts_log = open(ts_log_fname, 'w')
         self.ts_log.write('n_buf, buf.pts, time.perf_counter()\n')
         self.n_frames = 0
         self.t0 = 0.0
         self.pipeline = Gst.Pipeline()
-        
+
         def on_new_sample(appsink):
             """
             Function called from the pipeline by appsink.
@@ -810,7 +836,7 @@ class Webcam_ts_minimal_raw:
         self.v4l2src = Gst.ElementFactory.make('v4l2src', None)
         self.v4l2src.set_property('device', video_dev)
         self.v4l2src.set_property('do-timestamp', 'true')
-        # Formats available from C920 camera: 
+        # Formats available from C920 camera:
         #   'image/jpeg', 'video/x-h264', 'video/x-raw'
         vid_caps = Gst.Caps.from_string('video/x-raw,'
                                         'format=YUY2,'
@@ -838,16 +864,16 @@ class Webcam_ts_minimal_raw:
         self.vid_filter.link(self.ts_sink)
         #self.vid_filter.link(self.vid_parse)
         #self.vid_parse.link(self.ts_sink)
-                      
+
     def run(self):
         self.t0 = time.perf_counter()
         self.pipeline.set_state(Gst.State.PLAYING)
 
     def close(self):
         self.pipeline.set_state(Gst.State.NULL)
-        self.ts_log.close()        
+        self.ts_log.close()
 
-        
+
 def get_frames_in_interval(vid_fn, ts_fn, interval=[0, -1]):
     """
     Parameters
@@ -878,18 +904,18 @@ def get_frames_in_interval(vid_fn, ts_fn, interval=[0, -1]):
 
     n_and_ts = n_and_ts[n_and_ts['ts'] >= t0]
     n_and_ts = n_and_ts[n_and_ts['ts'] <= t1]
-    
+
     frames = []
     frames.append(reader.get_frame(n_and_ts[0]['run_ts']))
     t = reader.get_current_position('time')
 
-    i=0
+    i = 0
     while t <= n_and_ts[-1]['run_ts']:
         frames.append(reader.get_next_frame())
         t = reader.get_current_position('time')
         n_and_ts['vid_ts'][i] = t
-        i+=1
-        
+        i += 1
+
     reader.close()
 
     return frames, n_and_ts
@@ -900,32 +926,34 @@ class VideoReader:
     For reading video frames one-by-one.
     Reuturns the frames in as a numpy array in RGB format.
     Not meant for playback.
-    
+
     Follows the snapshot example:
-    http://cgit.freedesktop.org/gstreamer/gst-plugins-base/tree/tests/examples/snapshot/snapshot.c
-    
+    http://cgit.freedesktop.org/gstreamer/gst-plugins-base/tree/tests/'
+            'examples/snapshot/snapshot.c
+
     By Hjalmar K. Turesson 2015-12-08
     """
 
     def __init__(self, fname):
         """
         """
-        self.frame_size = (480,640,3)
+        self.frame_size = (480, 640, 3)
         self.frame_size_bytes = np.prod(self.frame_size)
-        s=('filesrc location=%s '
-           '! decodebin ! videoconvert '
-           '! video/x-raw, height=%d, width=%d, format=RGB '
-           '! videoconvert ! appsink name=sink' % 
-           (fname, self.frame_size[0], self.frame_size[1]))
-        self.pipeline=Gst.parse_launch(s)
+        # TODO: Check that file exists and can be opened.
+        s = ('filesrc location=%s '
+             '! decodebin ! videoconvert '
+             '! video/x-raw, height=%d, width=%d, format=RGB '
+             '! videoconvert ! appsink name=sink' %
+             (fname, self.frame_size[0], self.frame_size[1]))
+        self.pipeline = Gst.parse_launch(s)
         # get sink
-        self.appsink=self.pipeline.get_by_name("sink")
-        self.appsink.set_property("max-buffers", 20) # To limit memory usage
+        self.appsink = self.pipeline.get_by_name("sink")
+        self.appsink.set_property("max-buffers", 20)  # To limit memory usage
         # set to PAUSED to make the first frame arrive in the sink
         self.pipeline.set_state(Gst.State.PAUSED)
         # Wait for state change, i.e. block for up to 5 s.
         self.pipeline.get_state(5*Gst.SECOND)
-        
+
         # Pull 1st sample to get framerate
         smp = self.appsink.emit('pull-preroll')
         sinkcaps = smp.get_caps().get_structure(0)
@@ -933,13 +961,13 @@ class VideoReader:
         if not fps[0]:
             print('Frame rate info is missing form file.')
             return None
-        
+
         # Frame rate, frames per second
         self.fps_frac = (fps[1], fps[2])
-        self.fps = fps[2]/fps[1]
-        # Frames per nanosecond
-        self.fpns = (Gst.SECOND * fps[2])/fps[1]
-        
+        self.fps = fps[1]/fps[2]
+        # Nano seconds per frames
+        self.dt_ns = Gst.SECOND * fps[2]/fps[1]
+
         # Duration of video in nano seconds, seconds and frames
         ret = self.pipeline.query_duration(Gst.Format.TIME)
         self.duration_nanoseconds = None
@@ -954,30 +982,28 @@ class VideoReader:
             print('Duration query failed.')
             return None
 
-
     def _get_current_frame(self):
         """
         Reads the frame at the current position.
 
         Returns:
-        frame : An uint8 numpy array in RGB format.        
+        frame : An uint8 numpy array in RGB format.
         """
-        
+
         smp = self.appsink.emit('pull-preroll')
         buf = smp.get_buffer()
-        data=buf.extract_dup(0, buf.get_size())
-                    
-        return np.fromstring(data, dtype='uint8').reshape((480, 640, 3))
+        data = buf.extract_dup(0, buf.get_size())
 
+        return np.fromstring(data, dtype='uint8').reshape((480, 640, 3))
 
     def get_frame(self, t):
         """
         Reads a frame at time t.
-        
+
         Parameter:
         ---------
         t : time of frame in seconds.
-        
+
         Returns:
         frame : An uint8 numpy array in RGB format.
         """
@@ -985,21 +1011,22 @@ class VideoReader:
         if self.duration_nanoseconds < t:
             print('Requested frame time is after end of video.')
             return None
-            
-        ret = self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, t)
+
+        ret = self.pipeline.seek_simple(Gst.Format.TIME,
+                                        Gst.SeekFlags.FLUSH,
+                                        t)
         # Wait for state change, i.e. block for up to 5 s.
         self.pipeline.get_state(5*Gst.SECOND)
         if not ret:
             print('Seek to time %1.4f s failed.' % t/Gst.SECOND)
             return None
-            
-        return self._get_current_frame()
 
+        return self._get_current_frame()
 
     def get_next_frame(self):
         """
         Reads the next frame from current position.
-        
+
         Returns:
         frame : An uint8 numpy array in RGB format.
         """
@@ -1008,10 +1035,10 @@ class VideoReader:
             print('Position query failed.')
             return 0
 
-        t = int(round(ret[1] + self.fpns))
+        t = int(round(ret[1] + self.dt_ns))
 
-        # NOTE:
-        # Seems like pipeline.query_position(Gst.Format.BUFFERS) failes to 
+        # TODO:
+        # Seems like pipeline.query_position(Gst.Format.BUFFERS) failes to
         # return current position in number of frames.
         # Fix this and frame stepping can be checked.
 
@@ -1026,16 +1053,18 @@ class VideoReader:
         if self.duration_nanoseconds < t:
             print('Requested frame time is after end of video.')
             return None
-     
-        ret = self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH, t)
+
+        ret = self.pipeline.seek_simple(Gst.Format.TIME,
+                                        Gst.SeekFlags.FLUSH,
+                                        t)
         # Wait for state change, i.e. block for up to 5 s.
         self.pipeline.get_state(5*Gst.SECOND)
         if not ret:
             print('Seek to frame at time %1.4f s failed.' % t/Gst.SECOND)
-            return None         
+            return None
 
-        # NOTE:
-        # Seems like pipeline.query_position(Gst.Format.BUFFERS) failes to 
+        # TODO:
+        # Seems like pipeline.query_position(Gst.Format.BUFFERS) failes to
         # return current position in number of frames.
         # Fix this and frame stepping can be checked.
 
@@ -1050,39 +1079,46 @@ class VideoReader:
 #                print('Failed to step one frame.\nOld frame num:'
 #                      ' %d, new frame num: %d' % (old_pos, new_pos))
 #            return None
-                                                                                     
+
         return self._get_current_frame()
-        
 
     def get_current_position(self, fmt='time'):
         """
         Returns the current postion in time (seconds) or frame number.
-        
+
         Parameters:
         ----------
-        fmt : format for position. 
-              'time' returns time in seconds or 
-              'frame_number' frame number.
+        fmt : format for position.
+              'time' returns time in seconds or
+              'frame_number' as the number of frames from the beginning to
+              current position.
         """
-        
+
         pos = None
-        if fmt=='time':
+        if fmt == 'time':
             ret = self.pipeline.query_position(Gst.Format.TIME)
             if ret[0]:
                 pos = ret[1]/Gst.SECOND
-        elif fmt=='frame_number':
+        elif fmt == 'frame_number':
             ret = self.pipeline.query_position(Gst.Format.BUFFERS)
-            if ret[0]:
+            if ret[0] and ret[1] >= 0:  # TODO: ret[0] == True even when the
+                                        # frame number is 0, i.e. the query
+                                        # failed.
+                                        # Thus, ret[1] has to be >= 0.
                 pos = ret[1]
+            else:
+                ret = self.pipeline.query_position(Gst.Format.TIME)
+                if ret[0]:
+                    pos = int(round((ret[1]/Gst.SECOND)*self.fps))
+
         else:
-            print('%s is not a vaild format.' 
-                  ' Valid formats are "time" | "frame_number"' % fmt)
+            print('%s is not a vaild format. '
+                  'Valid formats are "time" | "frame_number"' % fmt)
 
         if pos is None:
             print('Position query failed.')
-        
-        return pos
 
+        return pos
 
     def close(self):
         """
