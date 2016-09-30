@@ -8,17 +8,100 @@ import os
 import numpy as np
 from datetime import datetime
 import time
+import pathlib
 # Setting GST_DEBUG_DUMP_DOT_DIR environment variable enables us to  have a
 #  dotfile generated. The environment variable cannot be set inside the class.
 os.environ["GST_DEBUG_DUMP_DOT_DIR"] = "/tmp"
 # GStreamer imports
 import gi
 gi.require_version('Gst', '1.0')
-from gi.repository import GObject, Gst, Gtk
+gi.require_version('GstPbutils', '1.0')
+#gi.require_version('Gtk', '3.0')
+from gi.repository import GObject, Gst
+Gst.init(None)
 Gst.debug_set_active(False)
 Gst.debug_set_default_threshold(0)
+from gi.repository import GstPbutils
 GObject.threads_init()
-Gst.init(None)
+
+
+
+def get_file_info(fname, verbose=False):
+    """
+    Gets info from video file.
+    
+    See:
+    http://stackoverflow.com/questions/11324519/how-do-i-use-the-discoverer-module-with-pygi-gstpbutils
+    
+    Hjalmar K. Turesson, 2016-09-22
+    """
+    
+    def on_discovered(discoverer, ismedia, infile):
+        pass
+
+    discoverer = GstPbutils.Discoverer()
+    discoverer.connect('discovered', on_discovered)
+    uri = pathlib.Path(fname).as_uri()
+    info = discoverer.discover_uri(uri)
+
+    video_info = {'format': '--',
+                  'format_version': '--',
+                  'format_specification': '--',
+                  'width': -1,
+                  'height': -1,
+                  'fps': -1}
+    
+    # video info
+    vstreams = info.get_video_streams()
+    if len(vstreams) == 1:
+        vcaps = vstreams[0].get_caps().to_string()
+        if verbose:
+            print('Video info:')
+            print(vcaps)
+        
+        vcaps = vcaps.split(',')
+    
+        for prop in vcaps:
+            if 'video/' in prop:
+                video_info['format'] = prop
+            elif 'version=' in prop:
+                video_info['format_version'] = prop.split(')')[-1]
+            elif 'format=' in prop:
+                video_info['format_specification'] = prop.split(')')[-1]            
+            elif 'width=' in prop:
+                video_info['width'] = int(prop.split(')')[-1])
+            elif 'height=' in prop:
+                video_info['height'] = int(prop.split(')')[-1])
+            elif 'framerate=' in prop:
+                if 'fraction' in prop:
+                    video_info['fps'] = eval(prop.split(')')[-1])
+                elif 'in' in prop:
+                    video_info['fps'] = int(prop.split(')')[-1])
+                else:
+                    video_info['fps'] = prop.split(')')[-1]
+    else:
+        print('%d video streams found, expected 1' % len(vstreams))
+
+    # audio info
+    astreams = info.get_audio_streams()
+    if len(astreams):
+        acaps = []
+        for astream in astreams:
+            acaps.append(astream.get_caps().to_string())
+            
+        if verbose:
+            print('Audio info:')
+            print(acaps)
+            
+        audio_info = acaps
+    else:
+        if verbose:
+            print('No audio stream found')
+        
+        audio_info = []
+    
+    
+    return video_info, audio_info
 
 
 class Webcam_h264:
@@ -709,7 +792,7 @@ class Webcam:
 
     ######################################################
     # Generates the dot file, checks that graphviz in installed
-    # and generates a png file, which it then displays the pipeline
+    # and generates a png file, which then displays the pipeline
     ######################################################
     def on_debug_activate(self):
         fn = 'pipeline-debug-graph'
@@ -719,7 +802,7 @@ class Webcam:
         try:
             os.system("dot -Tpng %s > %s" % (fn_dot, fn_png))
             print('Pipline graph written to %s' % fn_png)
-            Gtk.show_uri(None, "file://%s" % fn_png, 0)
+            #Gtk.show_uri(None, "file://%s" % fn_png, 0)
         except:
             print('Failure!')
             # check if graphviz is installed with a simple test
@@ -932,24 +1015,33 @@ class VideoReader:
             'examples/snapshot/snapshot.c
 
     By Hjalmar K. Turesson 2015-12-08
+    
+    gst-launch-1.0 filesrc location=file.ogg ! decodebin ! audioconvert ! audioresample ! autoaudiosink
     """
 
     def __init__(self, fname):
         """
         """
-        self.frame_size = (480, 640, 3)
-        self.frame_size_bytes = np.prod(self.frame_size)
-        # TODO: Check that file exists and can be opened.
+        
+        #vinfo, _ = get_file_info(fname, verbose=False)
+        #self.frame_shape = (vinfo['height'], vinfo['width'], 3)
+        # self.frame_shape[0], self.frame_shape[1]
+
+        if not os.path.isfile(fname):
+            raise ValueError('No such file: %s' % fname)
+        #height=%d, width=%d, 
         s = ('filesrc location=%s '
-             '! decodebin ! videoconvert '
-             '! video/x-raw, height=%d, width=%d, format=RGB '
-             '! videoconvert ! appsink name=sink' %
-             (fname, self.frame_size[0], self.frame_size[1]))
+             '! decodebin '
+             '! videoconvert '
+             '! video/x-raw, format=RGB '
+             '! appsink name=sink' % fname)
         self.pipeline = Gst.parse_launch(s)
+      
         # get sink
         self.appsink = self.pipeline.get_by_name("sink")
         self.appsink.set_property("max-buffers", 20)  # To limit memory usage
         # set to PAUSED to make the first frame arrive in the sink
+
         self.pipeline.set_state(Gst.State.PAUSED)
         # Wait for state change, i.e. block for up to 5 s.
         self.pipeline.get_state(5*Gst.SECOND)
@@ -959,15 +1051,38 @@ class VideoReader:
         sinkcaps = smp.get_caps().get_structure(0)
         fps = sinkcaps.get_fraction("framerate")
         if not fps[0]:
-            print('Frame rate info is missing form file.')
+            print('Frame rate is missing form file.')
             return None
 
         # Frame rate, frames per second
         self.fps_frac = (fps[1], fps[2])
         self.fps = fps[1]/fps[2]
         # Nano seconds per frames
-        self.dt_ns = Gst.SECOND * fps[2]/fps[1]
-
+        self.dt_ns = int((Gst.SECOND * fps[2]) / fps[1])            
+            
+        # Get and set frame width
+        width = sinkcaps.get_int("width")
+        if not width[0]:
+            print('Frame width is missing from file.')
+            return None        
+        self.width = width[1]
+        #sinkcaps.set_value("width", self.width)
+        # Get and set frame height
+        height = sinkcaps.get_int("height")
+        if not height[0]:
+            print('Frame height is missing from file.')
+            return None
+        self.height = height[1]
+        #sinkcaps.set_value("height", self.height)
+        
+        color_format = sinkcaps.get_value('format')
+        if 'GRAY' in color_format:   # One color channel?
+            self.frame_shape = (self.height, self.width, 1)
+        else:
+            self.frame_shape = (self.height, self.width, 3)
+            
+        self.frame_size = np.prod(self.frame_shape)
+                
         # Duration of video in nano seconds, seconds and frames
         ret = self.pipeline.query_duration(Gst.Format.TIME)
         self.duration_nanoseconds = None
@@ -975,12 +1090,22 @@ class VideoReader:
             self.duration_seconds = ret[1]/Gst.SECOND
             self.duration_nanoseconds = ret[1]
             # Approximate the number of frames.
-            self.duration_nframes = int(round(self.duration_seconds
-                                              * self.fps_frac[0]))
+            self.duration_nframes = int(round(self.duration_seconds * 
+                                              self.fps_frac[0] / self.fps_frac[1]))
 
         if self.duration_nanoseconds is None:
             print('Duration query failed.')
             return None
+            
+        # To avoid having to call buf.get_size() for every frame
+        self.buf_size = None
+        
+        # for some videos buf.get_size() returned 400 bytes more
+        # of data more than np.prod(self.frame_shape). I don't know why.
+        # This occurs for videoconvert to RGB and NOT RGBx
+        # (but I don't want a height x width x 4 shaped frame)
+        self.buf_wrong_size = False
+         
 
     def _get_current_frame(self):
         """
@@ -991,10 +1116,38 @@ class VideoReader:
         """
 
         smp = self.appsink.emit('pull-preroll')
-        buf = smp.get_buffer()
-        data = buf.extract_dup(0, buf.get_size())
 
-        return np.fromstring(data, dtype='uint8').reshape((480, 640, 3))
+        if not smp is None:
+            
+            buf = smp.get_buffer()
+            
+            if self.buf_size is None:
+                self.buf_size = buf.get_size()
+                # Check for the buffer/frame size discrepancy
+
+                # for some videos buf.get_size() returned 400 bytes more
+                # of data more than np.prod(self.frame_shape). I don't know why.
+                # This occurs for videoconvert to RGB and NOT RGBx
+                # (but I don't want a height x width x 4 shaped frame)
+                if self.buf_size > self.frame_size:
+                    self.buf_wrong_size = True            
+                    # this hack seems to fix it
+                    step = self.buf_size // np.prod(self.frame_shape[0])
+                    rm_ix = np.arange(self.frame_shape[0]) * step
+                    self.keep_ix = np.ones(self.buf_size, dtype=bool)
+                    self.keep_ix[rm_ix-1] = False
+                    self.keep_ix[rm_ix-2] = False
+            
+            data = np.fromstring(buf.extract_dup(0, self.buf_size), dtype='uint8')
+
+            if self.buf_wrong_size:
+                data = data[self.keep_ix]            
+
+
+            return data.reshape(self.frame_shape)
+
+        else:
+            return None
 
     def get_frame(self, t):
         """
@@ -1020,8 +1173,8 @@ class VideoReader:
         if not ret:
             print('Seek to time %1.4f s failed.' % t/Gst.SECOND)
             return None
-
-        return self._get_current_frame()
+        else:
+            return self._get_current_frame()
 
     def get_next_frame(self):
         """
@@ -1035,7 +1188,8 @@ class VideoReader:
             print('Position query failed.')
             return 0
 
-        t = int(round(ret[1] + self.dt_ns))
+        
+        t = ret[1] + self.dt_ns
 
         # TODO:
         # Seems like pipeline.query_position(Gst.Format.BUFFERS) failes to
@@ -1079,8 +1233,8 @@ class VideoReader:
 #                print('Failed to step one frame.\nOld frame num:'
 #                      ' %d, new frame num: %d' % (old_pos, new_pos))
 #            return None
-
-        return self._get_current_frame()
+        else:
+            return self._get_current_frame()
 
     def get_current_position(self, fmt='time'):
         """
